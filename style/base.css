@@ -4,11 +4,11 @@
 |----------------------------------------------------------------------------*/
 
 [data-jp-theme-light='true'] .jp-GitHub-icon {
-  background-image: url(octocat-light.svg);
+  background-image: url(brick.svg);
 }
 
 [data-jp-theme-light='false'] .jp-GitHub-icon {
-  background-image: url(octocat-dark.svg);
+  background-image: url(brick.svg);
 }
 
 .jp-GitHubBrowser {

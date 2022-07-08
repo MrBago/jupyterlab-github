@@ -140,9 +140,10 @@ export class GitHubDrive implements Contents.IDrive {
     path: string,
     options?: Contents.IFetchOptions
   ): Promise<Contents.IModel> {
-    let baseUrl =
-      'https://e2-dogfood.staging.cloud.databricks.com/api/2.0/workspace/';
-    console.error(`getting path: ${path}`);
+    // temp hack, run against mitm proxy
+    let baseUrl = 'http://localhost:8001/api/2.0/workspace/';
+    console.log(`get: ${path}`, options);
+
     let url;
     if (path === '') {
       url = new URL(baseUrl + 'list');

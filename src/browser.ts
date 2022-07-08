@@ -277,7 +277,8 @@ export class GitHubUserInput extends Widget {
     const wrapper = new Widget();
     wrapper.addClass('jp-GitHubUserInput-wrapper');
     this._input = document.createElement('input');
-    this._input.placeholder = 'GitHub User';
+    this._input.placeholder = 'Path';
+    this._input.value = '/';
     this._input.className = 'jp-GitHubUserInput-input';
     wrapper.node.appendChild(this._input);
     layout.addWidget(wrapper);
