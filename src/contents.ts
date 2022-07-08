@@ -145,16 +145,23 @@ export class GitHubDrive implements Contents.IDrive {
     console.log(`get: ${path}`, options);
 
     let url;
+    let databricksPath =
+      options?.type == 'notebook' && path.endsWith('.ipynb')
+        ? path.substring(0, path.length - 6)
+        : path;
     if (options?.type == 'notebook') {
       url = new URL(baseUrl + 'export');
-      url.searchParams.append('path', '/' + path);
+      url.searchParams.append('path', '/' + databricksPath);
       url.searchParams.append('format', 'JUPYTER');
       url.searchParams.append('direct_download', 'false');
     } else if (options?.content == true) {
       url = new URL(baseUrl + 'list');
-      url.searchParams.append('path', '/' + path);
+      url.searchParams.append('path', '/' + databricksPath);
     } else {
-      console.error(`error: ${path}`, options);
+      console.error(
+        `error: ${path}, databricksPath ${databricksPath}`,
+        options
+      );
       return Promise.resolve(Private.dummyDirectory);
     }
 
@@ -166,7 +173,7 @@ export class GitHubDrive implements Contents.IDrive {
               let tp = obj.object_type.toLowerCase();
               return {
                 name: PathExt.basename(obj.path),
-                path: obj.path,
+                path: obj.path + (tp === 'notebook' ? '.ipynb' : ''),
                 type: tp,
                 created: '',
                 writable: false,
