@@ -145,33 +145,37 @@ export class GitHubDrive implements Contents.IDrive {
     console.log(`get: ${path}`, options);
 
     let url;
-    if (path === '') {
-      url = new URL(baseUrl + 'list');
-      url.searchParams.append(
-        'path',
-        '/Users/bago@databricks.com/jupyterLiteHack'
-      );
-    } else {
+    if (options?.type == 'notebook') {
       url = new URL(baseUrl + 'export');
       url.searchParams.append('path', '/' + path);
       url.searchParams.append('format', 'JUPYTER');
       url.searchParams.append('direct_download', 'false');
+    } else if (options?.content == true) {
+      url = new URL(baseUrl + 'list');
+      url.searchParams.append('path', '/' + path);
+    } else {
+      console.error(`error: ${path}`, options);
+      return Promise.resolve(Private.dummyDirectory);
     }
+
     return this._apiRequest<any>(url.href)
       .then(contents => {
         if (contents.hasOwnProperty('objects')) {
-          let content = contents.objects.map((obj: any) => {
-            return {
-              name: PathExt.basename(obj.path),
-              path: obj.path,
-              type: 'notebook',
-              created: '',
-              writable: false,
-              last_modified: '',
-              mimetype: '',
-              content: null
-            };
-          });
+          let content = contents.objects
+            .map((obj: any) => {
+              let tp = obj.object_type.toLowerCase();
+              return {
+                name: PathExt.basename(obj.path),
+                path: obj.path,
+                type: tp,
+                created: '',
+                writable: false,
+                last_modified: '',
+                mimetype: tp === 'notebook' ? 'application/x-ipynb+json' : '',
+                content: null
+              };
+            })
+            .sort((a: any, b: any) => a.object_type < b.object_type);
           return {
             name: '',
             path: '/',
@@ -192,7 +196,7 @@ export class GitHubDrive implements Contents.IDrive {
             created: '',
             writable: false,
             last_modified: '',
-            mimetype: 'application/json',
+            mimetype: 'application/x-ipynb+json',
             content: JSON.parse(Private.b64DecodeUTF8(contents?.content))
           } as Contents.IModel;
         }
@@ -242,6 +246,7 @@ export class GitHubDrive implements Contents.IDrive {
    * path if necessary.
    */
   getDownloadUrl(path: string): Promise<string> {
+    console.log(`getDownloadUrl: ${path}`);
     Promise.resolve('');
     // Parse the path into user/repo/path
     const resource = parsePath(path);
