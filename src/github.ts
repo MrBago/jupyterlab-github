@@ -12,14 +12,18 @@ import { ServerConnection } from '@jupyterlab/services';
  * @returns a Promise resolved with the JSON response.
  */
 export function browserApiRequest<T>(url: string): Promise<T> {
-  return window.fetch(url).then(response => {
-    if (response.status !== 200) {
-      return response.json().then(data => {
-        throw new ServerConnection.ResponseError(response, data.message);
-      });
-    }
-    return response.json();
-  });
+  return window
+    .fetch(url, {
+      headers: { Authorization: 'Bearer [token]' }
+    })
+    .then(response => {
+      if (response.status !== 200) {
+        return response.json().then(data => {
+          throw new ServerConnection.ResponseError(response, data.message);
+        });
+      }
+      return response.json();
+    });
 }
 
 /**

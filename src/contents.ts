@@ -13,7 +13,6 @@ import { Contents, ServerConnection } from '@jupyterlab/services';
 
 import {
   browserApiRequest,
-  proxiedApiRequest,
   GitHubRepo,
   GitHubContents,
   GitHubBlob,
@@ -45,27 +44,6 @@ export class GitHubDrive implements Contents.IDrive {
 
     this.baseUrl = DEFAULT_GITHUB_BASE_URL;
 
-    // Test an api request to the notebook server
-    // to see if the server proxy is installed.
-    // If so, use that. If not, warn the user and
-    // use the client-side implementation.
-    this._useProxy = new Promise<boolean>(resolve => {
-      const requestUrl = URLExt.join(this._serverSettings.baseUrl, 'github');
-      proxiedApiRequest<any>(requestUrl, this._serverSettings)
-        .then(() => {
-          resolve(true);
-        })
-        .catch(() => {
-          console.warn(
-            'The JupyterLab GitHub server extension appears ' +
-              'to be missing. If you do not install it with application ' +
-              'credentials, you are likely to be rate limited by GitHub ' +
-              'very quickly'
-          );
-          resolve(false);
-        });
-    });
-
     // Initialize the rate-limited observable.
     this.rateLimitedState = new ObservableValue(false);
   }
@@ -73,8 +51,8 @@ export class GitHubDrive implements Contents.IDrive {
   /**
    * The name of the drive.
    */
-  get name(): 'GitHub' {
-    return 'GitHub';
+  get name(): 'Databricks' {
+    return 'Databricks';
   }
 
   /**
@@ -162,44 +140,61 @@ export class GitHubDrive implements Contents.IDrive {
     path: string,
     options?: Contents.IFetchOptions
   ): Promise<Contents.IModel> {
-    const resource = parsePath(path);
-    // If the org has not been set, return an empty directory
-    // placeholder.
-    if (resource.user === '') {
-      this._validUser = false;
-      return Promise.resolve(Private.dummyDirectory);
+    let baseUrl =
+      'https://e2-dogfood.staging.cloud.databricks.com/api/2.0/workspace/';
+    console.error(`getting path: ${path}`);
+    let url;
+    if (path === '') {
+      url = new URL(baseUrl + 'list');
+      url.searchParams.append(
+        'path',
+        '/Users/bago@databricks.com/jupyterLiteHack'
+      );
+    } else {
+      url = new URL(baseUrl + 'export');
+      url.searchParams.append('path', '/' + path);
+      url.searchParams.append('format', 'JUPYTER');
+      url.searchParams.append('direct_download', 'false');
     }
-
-    // If the org has been set and the path is empty, list
-    // the repositories for the org.
-    if (resource.user && !resource.repository) {
-      return this._listRepos(resource.user);
-    }
-
-    // Otherwise identify the repository and get the contents of the
-    // appropriate resource.
-    const apiPath = URLExt.encodeParts(
-      URLExt.join(
-        'repos',
-        resource.user,
-        resource.repository,
-        'contents',
-        resource.path
-      )
-    );
-    return this._apiRequest<GitHubContents>(apiPath)
+    return this._apiRequest<any>(url.href)
       .then(contents => {
-        // Set the states
-        this._validUser = true;
-        if (this.rateLimitedState.get() !== false) {
-          this.rateLimitedState.set(false);
+        if (contents.hasOwnProperty('objects')) {
+          let content = contents.objects.map((obj: any) => {
+            return {
+              name: PathExt.basename(obj.path),
+              path: obj.path,
+              type: 'notebook',
+              created: '',
+              writable: false,
+              last_modified: '',
+              mimetype: '',
+              content: null
+            };
+          });
+          return {
+            name: '',
+            path: '/',
+            format: 'json',
+            type: 'directory',
+            created: '',
+            last_modified: '',
+            writable: false,
+            mimetype: '',
+            content
+          } as Contents.IModel;
+        } else {
+          return {
+            name: PathExt.basename(path),
+            path: path,
+            format: 'json',
+            type: 'notebook',
+            created: '',
+            writable: false,
+            last_modified: '',
+            mimetype: 'application/json',
+            content: JSON.parse(Private.b64DecodeUTF8(contents?.content))
+          } as Contents.IModel;
         }
-
-        return Private.gitHubContentsToJupyterContents(
-          path,
-          contents,
-          this._fileTypeForPath
-        );
       })
       .catch((err: ServerConnection.ResponseError) => {
         if (err.response.status === 404) {
@@ -246,6 +241,7 @@ export class GitHubDrive implements Contents.IDrive {
    * path if necessary.
    */
   getDownloadUrl(path: string): Promise<string> {
+    Promise.resolve('');
     // Parse the path into user/repo/path
     const resource = parsePath(path);
     // Error if the user has not been set
@@ -455,119 +451,17 @@ export class GitHubDrive implements Contents.IDrive {
   }
 
   /**
-   * List the repositories for the currently active user.
-   */
-  private _listRepos(user: string): Promise<Contents.IModel> {
-    // First, check if the `user` string is actually an org.
-    // If will return with an error if not, and we can try
-    // the user path.
-    const apiPath = URLExt.encodeParts(URLExt.join('orgs', user, 'repos'));
-    return this._apiRequest<GitHubRepo[]>(apiPath)
-      .catch(err => {
-        // If we can't find the org, it may be a user.
-        if (err.response.status === 404) {
-          // Check if it is the authenticated user.
-          return this._apiRequest<any>('user')
-            .then(currentUser => {
-              let reposPath: string;
-              // If we are looking at the currently authenticated user,
-              // get all the repositories they own, which includes private ones.
-              if (currentUser.login === user) {
-                reposPath = 'user/repos?type=owner';
-              } else {
-                reposPath = URLExt.encodeParts(
-                  URLExt.join('users', user, 'repos')
-                );
-              }
-              return this._apiRequest<GitHubRepo[]>(reposPath);
-            })
-            .catch(err => {
-              // If there is no authenticated user, return the public
-              // users api path.
-              if (err.response.status === 401) {
-                const reposPath = URLExt.encodeParts(
-                  URLExt.join('users', user, 'repos')
-                );
-                return this._apiRequest<GitHubRepo[]>(reposPath);
-              }
-              throw err;
-            });
-        }
-        throw err;
-      })
-      .then(repos => {
-        // Set the states
-        this._validUser = true;
-        if (this.rateLimitedState.get() !== false) {
-          this.rateLimitedState.set(false);
-        }
-        return Private.reposToDirectory(repos);
-      })
-      .catch(err => {
-        if (
-          err.response.status === 403 &&
-          err.message.indexOf('rate limit') !== -1
-        ) {
-          if (this.rateLimitedState.get() !== true) {
-            this.rateLimitedState.set(true);
-          }
-        } else {
-          console.error(err.message);
-          console.warn(
-            'GitHub: cannot find user. ' + 'Perhaps you misspelled something?'
-          );
-          this._validUser = false;
-        }
-        return Private.dummyDirectory;
-      });
-  }
-
-  /**
    * Determine whether to make the call via the
    * notebook server proxy or not.
    */
   private _apiRequest<T>(apiPath: string): Promise<T> {
-    return this._useProxy.then(result => {
-      let parts = apiPath.split('?');
-      let path = parts[0];
-      let query = (parts[1] || '').split('&');
-      let params: { [key: string]: string } = {};
-      for (const param of query) {
-        if (param) {
-          let [key, value] = param.split('=');
-          params[key] = value;
-        }
-      }
-      let requestUrl: string;
-      if (result === true) {
-        requestUrl = URLExt.join(this._serverSettings.baseUrl, 'github');
-        // add the access token if defined
-        if (this.accessToken) {
-          params['access_token'] = this.accessToken;
-        }
-      } else {
-        requestUrl = DEFAULT_GITHUB_API_URL;
-      }
-      if (path) {
-        requestUrl = URLExt.join(requestUrl, path);
-      }
-      let newQuery = Object.keys(params)
-        .map(key => `${key}=${params[key]}`)
-        .join('&');
-      requestUrl += '?' + newQuery;
-      if (result === true) {
-        return proxiedApiRequest<T>(requestUrl, this._serverSettings);
-      } else {
-        return browserApiRequest<T>(requestUrl);
-      }
-    });
+    return browserApiRequest<T>(apiPath);
   }
 
   private _baseUrl: string = 'github';
   private _accessToken: string | null | undefined;
   private _validUser = false;
   private _serverSettings: ServerConnection.ISettings;
-  private _useProxy: Promise<boolean>;
   private _fileTypeForPath: (path: string) => DocumentRegistry.IFileType;
   private _isDisposed = false;
   private _fileChanged = new Signal<this, Contents.IChangedArgs>(this);
